@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# MetaSynth's own project data stays local (clean-room spec: only our stimuli, renders and notes are published)
+lab/ms-lab/
+
+# Deployment secrets and build leftovers
+web/.env
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+lab/analysis/*.npy
