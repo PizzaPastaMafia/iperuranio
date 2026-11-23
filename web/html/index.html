@@ -83,6 +83,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-r
     </div>
     <div class="transport">
       <button id="play" type="button">▶ Play</button>
+      <button id="wav" type="button" title="Render the canvas to a 44.1 kHz stereo WAV (32-bit float, raw level)">Export WAV</button>
       <label class="inline"><input id="loop" type="checkbox" checked> Loop</label>
       <label class="inline">Out <input id="vol" type="range" min="-24" max="24" step="1" value="6" style="width:90px"><output id="volO">+6 dB</output></label>
       <span class="status" id="status">Ready</span>
@@ -193,7 +194,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-r
     </section>
   </div>
 
-  <footer><kbd>Space</kbd> play/stop · <kbd>q</kbd> cycle channel · <kbd>j</kbd> swap left/right · <kbd>Ctrl/Cmd Z</kbd> undo. Renders at 44.1 kHz and at MetaSynth's raw level, with no normalization; Out adds playback gain only. Tempo moves in whole samples per pixel at 32 pixels per beat. Each row and channel keeps one oscillator whose phase advances only while that row is lit, so a new note picks up where the last one stopped. Changing Size y keeps the bottom rows and adds or removes rows at the top. Row numbers in the readout count from the top, as in SPEC.md.</footer>
+  <footer><kbd>Space</kbd> play/stop · <kbd>q</kbd> cycle channel · <kbd>j</kbd> swap left/right · <kbd>Ctrl/Cmd Z</kbd> undo. Export WAV saves the same render as a 32-bit float stereo file. Renders at 44.1 kHz and at MetaSynth's raw level, with no normalization; Out adds playback gain only. Tempo moves in whole samples per pixel at 32 pixels per beat. Each row and channel keeps one oscillator whose phase advances only while that row is lit, so a new note picks up where the last one stopped. Changing Size y keeps the bottom rows and adds or removes rows at the top. Row numbers in the readout count from the top, as in SPEC.md.</footer>
 </div>
 
 <script>
@@ -329,10 +330,11 @@ function readout(c,r){if(c<0||c>=W||r<0||r>=H)return;const f=freqs[r],i=r*W+c,g=
   $('readout').innerHTML=`<span>col <b>${c}</b> · <b>${(c*S.spp/SR).toFixed(3)} s</b></span><span>row <b>${H-1-r}</b></span><span><b>${f<1000?f.toFixed(2):Math.round(f).toLocaleString()} Hz</b> ${noteName(f)}${audible(f)?'':' (≥ 20 kHz, silent)'}</span><span>gain <b>${g.toFixed(5)}</b></span><span>R <b>${Math.round(L[i]*255)}</b> G <b>${Math.round(R[i]*255)}</b></span>`;}
 
 /* ---------- audio ---------- */
-let ctx=null,master=null,src=null,buf=null,audioDirty=true,playing=false,t0=0,renderId=0,pending=null;
+let ctx=null,master=null,src=null,buf=null,out=null,audioDirty=true,playing=false,t0=0,renderId=0,pending=null;
 const worker=new Worker('engine.js');
 worker.onmessage=e=>{const {id,oL,oR,peak}=e.data;if(id!==renderId)return;
-  buf=ctx.createBuffer(2,oL.length,SR);buf.copyToChannel(oL,0);buf.copyToChannel(oR,1);audioDirty=false;
+  out={oL,oR,peak};buf=null;audioDirty=false;
+  if(ctx){buf=ctx.createBuffer(2,oL.length,SR);buf.copyToChannel(oL,0);buf.copyToChannel(oR,1);}
   const db=20*Math.log10(peak);status(peak===0?'Silent picture':`Peak ${db.toFixed(1)} dBFS`+(peak>1?' · clips':''),peak>1);
   const p=pending;pending=null;if(p)p();};
 const dbGain=d=>Math.pow(10,d/20);
@@ -343,14 +345,30 @@ function phi0(){ // SPEC §3.3: drawn per (row, channel) at each render
   if(m==='none')return [pL,pR];
   for(let r=0;r<H;r++){pL[r]=Math.random()*span;pR[r]=m.endsWith('Stereo')?Math.random()*span:pL[r];}
   return [pL,pR];}
-function render(then){renderId++;pending=then;status('Rendering…');const [phiL,phiR]=phi0();
+function render(then){renderId++;const prev=pending;pending=prev&&then?()=>{prev();then();}:(then||prev);status('Rendering…');const [phiL,phiR]=phi0();
   worker.postMessage({id:renderId,L,R,W,H,freqs,gains:rowGains(),sr:SR,spp:S.spp,att:S.att,rel:S.rel,wave:S.wave,phiL,phiR});}
 function startAt(offset){stopSrc();src=ctx.createBufferSource();src.buffer=buf;src.loop=$('loop').checked;src.connect(master);
   const d=buf.duration;offset=((offset%d)+d)%d;
   src.onended=()=>{if(src&&!src.loop&&playing){playing=false;playX=-1;uiPlay();}};
   src.start(0,offset);t0=ctx.currentTime-offset;playing=true;uiPlay();tick();}
 function stopSrc(){if(src){src.onended=null;try{src.stop();}catch(_){}src.disconnect();src=null;}}
-function play(){ensureCtx();if(audioDirty||!buf)render(()=>startAt(0));else startAt(0);}
+function play(){ensureCtx();if(!audioDirty&&out&&!buf){buf=ctx.createBuffer(2,out.oL.length,SR);buf.copyToChannel(out.oL,0);buf.copyToChannel(out.oR,1);}
+  if(audioDirty||!buf)render(()=>startAt(0));else startAt(0);}
+/* ---------- WAV export: the same worker render, written as 44.1 kHz stereo 32-bit float at raw level ---------- */
+function wavBlob(oL,oR){const n=oL.length,data=n*8,b=new ArrayBuffer(58),v=new DataView(b);
+  const str=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  str(0,'RIFF');v.setUint32(4,50+data,true);str(8,'WAVE');
+  str(12,'fmt ');v.setUint32(16,18,true);v.setUint16(20,3,true);v.setUint16(22,2,true);   // format 3 = IEEE float
+  v.setUint32(24,SR,true);v.setUint32(28,SR*8,true);v.setUint16(32,8,true);v.setUint16(34,32,true);v.setUint16(36,0,true);
+  str(38,'fact');v.setUint32(42,4,true);v.setUint32(46,n,true);
+  str(50,'data');v.setUint32(54,data,true);
+  const f=new Float32Array(n*2);for(let i=0;i<n;i++){f[2*i]=oL[i];f[2*i+1]=oR[i];}   // little-endian on every browser platform
+  return new Blob([b,f],{type:'audio/wav'});}
+function exportWav(){const go=()=>{const a=document.createElement('a'),d=new Date(),z=x=>String(x).padStart(2,'0');
+    a.href=URL.createObjectURL(wavBlob(out.oL,out.oR));
+    a.download=`raster-organ-${d.getFullYear()}${z(d.getMonth()+1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.wav`;
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);};
+  if(audioDirty||!out)render(go);else go();}
 function stop(){stopSrc();playing=false;playX=-1;uiPlay();}
 function tick(){if(!playing||!buf)return;let t=ctx.currentTime-t0;if($('loop').checked)t%=buf.duration;playX=Math.min(1,t*SR/(W*S.spp));requestAnimationFrame(tick);}
 function uiPlay(){const b=$('play');b.textContent=playing?'■ Stop':'▶ Play';b.classList.toggle('on',playing);}
@@ -436,6 +454,7 @@ $('phase').onchange=e=>{S.phase=e.target.value;changed();};
 $('vol').oninput=e=>{const d=+e.target.value;$('volO').textContent=(d>0?'+':'')+d+' dB';if(master)master.gain.setTargetAtTime(dbGain(d),ctx.currentTime,.02);};
 $('loop').onchange=e=>{if(src)src.loop=e.target.checked;};
 $('play').onclick=()=>playing?stop():play();
+$('wav').onclick=exportWav;
 function updateFacts(){const p=S.spp,n=W*p+Math.round(S.rel*SR/1000);
   $('bpmO').textContent=(SR*60/(p*PPB)).toFixed(3)+' BPM';
   $('sPx').textContent=p;$('msPx').textContent=(p/SR*1000).toFixed(3)+' ms';$('len').textContent=n.toLocaleString()+' smp · '+(n/SR).toFixed(3)+' s';

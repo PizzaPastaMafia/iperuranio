@@ -9,7 +9,7 @@ A clean-room study of MetaSynth CTX 2.0's Image Synth, and a Web Audio image syn
   - `analysis/`: the numpy/scipy scripts that produced the numbers in the spec
   - `ms-lab/`: the local MetaSynth project. It is **not committed**; see `.gitignore`.
 - **`web/`**: Raster Organ, the browser synth
-  - `html/index.html`: the page (UI, painting, maps, playback)
+  - `html/index.html`: the page (UI, painting, maps, playback, WAV export)
   - `html/engine.js`: the synthesis engine. It runs as a Web Worker and implements the spec.
   - `docker-compose.yml`: nginx behind Traefik
 - **`verify/`**: runs `engine.js` on the stimuli and compares the result with the renders
