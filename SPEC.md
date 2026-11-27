@@ -4,7 +4,7 @@ Black-box notes from rendering test images in MetaSynth (MS) and measuring the a
 No MS code or data files were read. Everything below comes from the UI and the rendered audio. The project's MS manual
 was used only to find out which controls exist. Where the manual and the measurements disagree, the measurement is what's recorded (see §5).
 
-- Sessions: 2026-11-11 (rev 1: §1–§5 core; rev 2: stereo, duration, phase modes, all pitch maps, amplitude map)
+- Sessions: 2026-11-11 (rev 1: §1–§5 core; rev 2: stereo, duration, phase modes, all pitch maps, amplitude map); 2026-11-27 (§10: image effects and the Effects Grid, pixel-exact)
 - MS CTX 2.0 on macOS · project `ms-lab`
 - Stimuli: `stimuli/` (PNG, black background) · Renders: `renders/` (float32 stereo WAV, converted losslessly from MS `.caf`)
 - Analysis: numpy/scipy least-squares sine fits at known or fitted frequencies. Scripts are in `analysis/`
@@ -183,6 +183,77 @@ L amplitude ∝ R/255        R amplitude ∝ G/255        Blue is ignored
 3. Non-sine wave tables (band-limiting near 20 kHz?), vibrato, attack modes, the filter.
 4. Custom Tuning maps (scale files); the bottom-anchor table for Micro maps above row 128 (extrapolated).
 5. 16-bit images (brightness resolution).
+6. Reverb (§10.4): an exact model. Next: single impulses at more G values, two impulses at varying distances (to test linearity / max-combining).
+7. Does a selection change the effects' cell origin (column 0) or limit the processed area?
+8. Pulse with odd G; Attack and Shorten at column 0; Motion Blur with G > 62 on wider pictures.
+
+## 10. Image Synth effects (right-hand list) and the Effects Grid
+Session 2026-11-27. Pixel-exact measurements: a test picture goes in, one effect is applied, the result is read back
+and compared with a formula. Files: `lab/fx/` (stimuli, 65 MetaSynth outputs, models, verifier).
+
+### 10.1 The Effects Grid control — **High**
+- It's **one integer G, in pixels**, in the number field under the effects list. The list icon next to it offers
+  8, 16, 32, 64, 128, 256, 12, 24, 48, 96, 192. Any integer can be typed, and the arrows step by 1.
+- G only acts **horizontally (time)**. Every effect works row by row, and rows don't interact (except Maximum).
+- Cells are anchored at **column 0**. There is no offset, angle or vertical size. To shift or skew the grid you'd
+  have to move the picture.
+- It's separate from the **Tool grid X/Y** (drawing snap) and from the blue **Grid Layer** (a grayscale picture,
+  saved as `p NNN_00.png`). Only Grid Filter reads the Grid Layer.
+- Shorten, Attack, Maximum and Grid Filter **ignore G**.
+- R and G channels are processed independently with identical rules. Blue isn't touched (it's the Grid Layer).
+
+### 10.2 Method
+- Stimulus PNG written into the project's preset folder (`ms-lab.presets/Picts/p 001_01.png`), project reopened,
+  effect applied, **Add Preset** writes the result as `p NNN_01.png`, then ⌘Z. The PNG round trip is exact (unchanged
+  picture → identical bytes) and ⌘Z always restored the input.
+- Three stimuli (`lab/fx/make_stimuli.py`): `stim_fx1` isolated impulses, bars, ramps, edges, pairs, colour cells;
+  `stim_fx2` impulse ladders (every value 1–255) and Maximum/Reverb probes; `stim_fx3` level steps a→b→0 and short notes.
+- G = 8, 12, 32, 64 for every effect on stim_fx1; extra runs on stim_fx2/3. 65 outputs in `lab/fx/out/`
+  (`s{stim}_{Effect}_G{G}.png`).
+- `lab/fx/fxmodel.py` has the models, and `lab/fx/verify_fx.py` checks them: **56/56 outputs match bit-exactly**
+  (Reverb isn't modelled and is skipped).
+
+### 10.3 Formulas
+Notation: one row of one channel, x = input, y = output, c = column (0…W−1), `//` = floor division, all values 8-bit.
+
+| Effect | Uses G | Rule (exact, verified) |
+|---|---|---|
+| **Motion Blur** | yes | R = min(G, 62). Weights w(d) = floor(32·exp(−2·(d/R)²)) for \|d\| ≤ R. **Wraps around** the row ends. y[c] = floor(Σ w(d)·x[c+d] / Σ w(d)). A symmetric, Gaussian-like blur, so G sets the blur width (σ ≈ R/2). |
+| **Quantize** | yes | Cells [kG, kG+G). Each cell becomes floor((max + sum/G) / 2), i.e. the mean of the cell's max and its average. The **last column (W−1)** is left out of max and sum but still gets its cell's value. A partial last cell is still divided by G. |
+| **Echo** | yes | y = x, then for c = G…W−1 from left to right: if y[c−G] > y[c], set y[c] = floor(x[c] + (y[c−G] − x[c]) / 3). It's recursive: each echo is ⅓ of the previous one, with copies every G px until it reaches 0 or the right edge. No wrap. |
+| **Pre Echo** | yes | Echo mirrored: c = W−1−G…0 from right to left, using y[c+G]. |
+| **Repeat** | yes | y = x, then c = G…W−1 from left to right: y[c] = max(y[c], y[c−G]). Full-strength copies every G px to the right edge. |
+| **Pulse** | yes | y[c] = 0 where (c mod G) ≥ G//2, otherwise x. A 50 % gate, open first. (Only even G tested.) |
+| **Saw** | yes | y[c] = floor(x[c]·(G − c mod G) / G). A ramp-down gain that restarts every G px. |
+| **Shorten** | no | y[c] = 0 where x[c] > 0, x[c−1] > 0 and x[c+1] == 0, i.e. the last pixel of every note at least 2 px long is cleared. 1-px notes are kept. The right edge (c = W−1) doesn't count as a note end. |
+| **Attack** | no | Where x[c] − x[c−1] > 16: y[c] = min(255, floor(1.5·x[c])) and y[c−1] = 0. A sharper onset: a dark gap before the jump and a 1.5× boost at the jump. A rise of ≤ 16 does nothing. |
+| **Maximum** | no | The only vertical effect. Every pixel of a column becomes that column's maximum (per channel). |
+| **Grid Filter** | no | y = floor(x·b / 256), where b = the Grid Layer (blue) pixel. A multiply-mask by the Grid Layer, so the "grid" here is the picture in the blue layer, not G. |
+| **Reverb** | yes | Not modelled exactly. See §10.4. |
+
+### 10.4 Reverb — **Medium** (properties) / **Low** (model)
+- It only adds tails **after falls**. A constant level or a slow ramp is unchanged, and pixels before a note are unchanged.
+- An isolated note gives a tail proportional to its amplitude (values 1–2 give no tail). The tail restarts with each note.
+- The state carries through: after 128→8→0 the 128's tail is still visible after the 8. A fall to a non-zero level b
+  roughly follows a·h[n] + b·(1 − (1 − 1/G)ⁿ), but that fit is poor (errors up to ≈ 57), so it isn't kept.
+- G sets the tail length. Tail after one 255 pixel (h[1], h[2], …; also in `fxmodel.REVERB_TAIL_255`):
+  - G 8 (22 px): 125 104 86 71 59 49 40 33 27 23 18 15 12 10 8 6 5 4 2 2 1 1
+  - G 12 (29 px): 131 115 100 87 76 66 57 50 43 37 33 28 24 21 18 15 13 11 10 8 7 5 4 4 3 2 2 1 1
+  - G 32 (56 px): 138 130 122 115 109 102 96 91 85 80 76 71 67 63 59 55 52 49 46 43 40 38 35 33 31 29 27 25 24 22 20 19 18 17 16 14 13 12 11 10 9 9 8 8 7 6 6 5 5 4 4 3 2 2 1 1
+  - G 64 (87 px): 137 132 128 124 120 116 112 109 105 102 99 95 92 89 87 84 81 78 76 73 71 68 66 64 62 59 57 55 53 52 50 48 47 45 43 42 40 38 37 36 34 33 32 31 30 29 28 27 26 24 23 22 21 20 19 18 17 17 16 16 15 14 14 13 13 12 12 11 11 10 9 9 8 8 7 7 6 6 5 4 4 3 3 2 2 1 1
+- The per-pixel decay ratio is ≈ 0.81 (G 8), ≈ 0.86 (G 12) and 0.926→0.941 (G 32). It drifts along the tail, so it isn't a
+  single exponential. It's more likely a few comb/all-pass stages with lengths tied to G.
+
+### 10.5 Implementation notes for the port
+- An "Effects Grid" control = one integer G ≥ 1 passed to the G-dependent effects. Making the grid editable beyond that
+  (offset, per-cell sizes, a vertical grid) would be our own extension, because MetaSynth has none of it.
+- To match MetaSynth bit-for-bit, use integer floor arithmetic as in `lab/fx/fxmodel.py`, including the Quantize
+  last-column quirk and the Motion Blur wrap-around.
+- For Reverb, use the measured tails as an impulse response with max-style combining until an exact model exists.
+  Scaling the 255 tail to the level before each fall and combining by maximum gets within 21 levels on every test
+  picture (`web/html/fx.js`).
+- Implemented in the web synth as `web/html/fx.js` (Effects panel). `verify/check_fx.py` checks it against all 56 exact
+  outputs. The panel adds a grid offset, which MetaSynth doesn't have; at offset 0 the effects match MetaSynth.
 
 ## Appendix: test log
 | ID | Image | Measured |
@@ -198,7 +269,9 @@ L amplitude ∝ R/255        R amplitude ∝ G/255        Blue is ignored
 | T14 (5 modes) | 90-row chord | φ0 distributions |
 | T15a/T15b × maps | every row 0–127 / 128–255, 4 px each | all pitch maps, cutoff, tuning A4, amp-map notch |
 | T16 | every row of a 128-high canvas | Size y = 128 |
+| FX1–FX3 (§10) | `lab/fx/stimuli/stim_fx1–3` × 12 effects × G 8/12/32/64 | effect formulas, Effects Grid; 65 outputs in `lab/fx/out/` |
 | T01_row128, T03/T04/T05_row128 | first versions (rows above the cutoff, silent; not used) | — |
 
 State left in MS: ms-lab project, Semitones, A3, 512×256, spp 321, WaveSynth 4/10 ms, Preferences back to Small Stereo.
 The amplitude-map notch from session 1 is still there.
+After the §10 session: ms-lab `p 001_01.png` holds `stim_fx3` (originals backed up in `metasynth-lab/lab/fx-lab/backup/`) and presets p 002–p 076 hold the effect outputs.

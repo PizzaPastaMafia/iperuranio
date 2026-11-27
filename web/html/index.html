@@ -73,6 +73,14 @@ select{background:var(--raise);border:1px solid var(--line);border-radius:6px;pa
 footer{color:var(--muted);font-size:12px;line-height:1.6}
 kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:var(--raise);color:var(--fg)}
 .drop{outline:2px dashed var(--grid);outline-offset:-6px}
+.fxlist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+@media (min-width:761px){#fxPanel{grid-column:span 2}.fxlist{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.fxlist button{font-size:13px;display:flex;justify-content:space-between;align-items:baseline;gap:4px;padding:6px 8px;text-align:left;min-width:0}
+.fxlist button small{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap}
+.fxlist button small.approx{color:var(--warn)}
+.gctl{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px}
+.gctl input{width:100%;min-width:0;text-align:center;font-family:var(--mono);font-size:15px;background:var(--raise);border:1px solid var(--line);border-radius:6px;padding:5px 6px;font-variant-numeric:tabular-nums}
+.gctl button{font-family:var(--mono);padding:5px 11px}
 </style>
 
 <div class="wrap">
@@ -199,7 +207,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-r
         </select></label>
       <label class="file"><button type="button" tabindex="-1" style="width:100%">Import image…</button><input id="file" type="file" accept="image/*" aria-label="Import image"></label>
       <div class="btns">
-        <button type="button" id="fxEcho" title="Graphic echo: ping-pong copies every half beat">Echo</button>
+        <button type="button" id="fxEcho" title="Graphic echo: ping-pong copies every half beat">Ping-pong</button>
         <button type="button" id="fxBlur" title="Smear attacks along time">Blur time</button>
         <button type="button" id="fxSwap" title="Swap left and right (j)">Swap L/R</button>
         <button type="button" id="fxRev" title="Flip time">Reverse</button>
@@ -207,18 +215,30 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-r
         <button type="button" id="clear">Clear</button>
       </div>
     </section>
+
+    <section class="panel" id="fxPanel">
+      <h2>Effects</h2>
+      <div class="row"><span>Effects grid <output id="gO">16 cells of 32 px</output></span>
+        <div class="gctl"><button type="button" id="gDec" aria-label="Grid one pixel smaller">−</button><input id="gIn" type="number" min="1" max="512" step="1" value="32" inputmode="numeric" aria-label="Effects grid size in pixels"><button type="button" id="gInc" aria-label="Grid one pixel larger">+</button></div>
+        <select id="gList" aria-label="Effects grid sizes"><option value="">MetaSynth sizes…</option></select></div>
+      <label class="row"><span>Grid offset <output id="gOffO">0 px</output></span><input id="gOff" type="range" min="0" max="31" step="1" value="0" title="Moves the cells along time. Not in MetaSynth. Double-click to reset"></label>
+      <label class="inline"><input id="gShow" type="checkbox" checked> Show the grid on the canvas</label>
+      <div class="fxlist" id="fxList"></div>
+      <p class="note">MetaSynth's Image Synth effects, measured pixel by pixel (SPEC.md §10). Each one changes the whole picture, row by row. The grid is the cell size in pixels along time. Grid Filter, Shorten, Attack and Maximum ignore it. The offset isn't in MetaSynth: it moves the cells for Quantize, Pulse and Saw. Reverb is approximate. Grid Filter multiplies by MetaSynth's default Grid Layer. Undo takes an effect back.</p>
+    </section>
   </div>
 
   <footer><kbd>Space</kbd> play/stop · <kbd>q</kbd> cycle channel · <kbd>j</kbd> swap left/right · <kbd>Ctrl/Cmd Z</kbd> undo. Export WAV saves the same render as a 32-bit float stereo file. Renders at 44.1 kHz and at MetaSynth's raw level, with no normalization; Out adds playback gain only. Tempo moves in whole samples per pixel at 32 pixels per beat. Each row and channel keeps one oscillator whose phase advances only while that row is lit, so a new note picks up where the last one stopped. Changing Size y keeps the bottom rows and adds or removes rows at the top. Row numbers in the readout count from the top, as in SPEC.md.</footer>
 </div>
 
+<script src="fx.js"></script>
 <script>
 (()=>{
 const W=512,SR=44100,PPB=32,CUT=20000,BASEGAIN=0.099025;
 let H=256;
 let L=new Float32Array(W*H), R=new Float32Array(W*H);   // index r*W+c, r = rows from the bottom (n in SPEC)
 const $=id=>document.getElementById(id);
-const S={tool:'note',chan:'rg',size:3,bri:204/255,asp:0,ang:0,hard:.5,spc:.01,map:'semi',tune:3,spp:321,wave:'sine',att:4,rel:10,phase:'smallStereo'};
+const S={tool:'note',chan:'rg',size:3,bri:204/255,asp:0,ang:0,hard:.5,spc:.01,map:'semi',tune:3,spp:321,wave:'sine',att:4,rel:10,phase:'smallStereo',fxG:32,fxOff:0,fxShow:true};
 
 /* ---------- pitch maps (SPEC §1.2, anchored at the bottom row, Master tuning A3) ---------- */
 const SCALES={major:[0,2,4,5,7,9,11],minharm:[0,2,3,5,7,8,11],minmel:[0,2,3,5,7,9,11]};
@@ -276,6 +296,8 @@ function draw(){
   vctx.font=`${10*dpr}px "IBM Plex Mono",monospace`;
   for(let c=PPB;c<W;c+=PPB){const x=Math.round(c/W*w)+.5,bar=c%(PPB*4)===0;vctx.strokeStyle=gridColor(bar?.32:.12);vctx.beginPath();vctx.moveTo(x,0);vctx.lineTo(x,h);vctx.stroke();
     if(bar){vctx.fillStyle=gridColor(.75);vctx.fillText((c*S.spp/SR).toFixed(2)+'s',x+3*dpr,h-4*dpr);}}
+  if(S.fxShow){vctx.save();vctx.strokeStyle='rgba(242,210,60,.42)';vctx.setLineDash([4*dpr,4*dpr]);vctx.beginPath();   // effects grid cells
+    for(let c=S.fxOff;c<W;c+=S.fxG){const x=Math.round(c/W*w)+.5;vctx.moveTo(x,0);vctx.lineTo(x,h);}vctx.stroke();vctx.restore();}
   for(let r=0;r<H;r++)if(!audible(freqs[r])){vctx.fillStyle='rgba(91,132,255,.11)';vctx.fillRect(0,h-(r+1)*h/H,w,h/H);}
   drawBrushOutline(w,h,dpr);
   if(playX>=0){const x=playX*w;vctx.fillStyle='rgba(255,255,255,.85)';vctx.fillRect(x-dpr,0,2*dpr,h);}
@@ -401,7 +423,7 @@ view.addEventListener('pointermove',e=>{const p=pos(e);hover=p;readout(p[0],p[1]
 const endStroke=()=>{moving=null;if(!painting)return;painting=false;changed();};
 view.addEventListener('pointerup',endStroke);view.addEventListener('pointerleave',()=>{hover=null;});view.addEventListener('pointercancel',endStroke);
 function readout(c,r){if(c<0||c>=W||r<0||r>=H)return;const f=freqs[r],i=r*W+c,g=BASEGAIN*amAt(H>1?r/(H-1):0);
-  $('readout').innerHTML=`<span>col <b>${c}</b> · <b>${(c*S.spp/SR).toFixed(3)} s</b></span><span>row <b>${H-1-r}</b></span><span><b>${f<1000?f.toFixed(2):Math.round(f).toLocaleString()} Hz</b> ${noteName(f)}${audible(f)?'':' (≥ 20 kHz, silent)'}</span><span>gain <b>${g.toFixed(5)}</b></span><span>R <b>${Math.round(L[i]*255)}</b> G <b>${Math.round(R[i]*255)}</b></span>`;}
+  $('readout').innerHTML=`<span>col <b>${c}</b> · <b>${(c*S.spp/SR).toFixed(3)} s</b></span><span>row <b>${H-1-r}</b></span><span><b>${f<1000?f.toFixed(2):Math.round(f).toLocaleString()} Hz</b> ${noteName(f)}${audible(f)?'':' (≥ 20 kHz, silent)'}</span><span>gain <b>${g.toFixed(5)}</b></span><span>R <b>${Math.round(L[i]*255)}</b> G <b>${Math.round(R[i]*255)}</b></span><span>effects cell <b>${Math.floor((c-S.fxOff)/S.fxG)+(S.fxOff?1:0)}</b></span>`;}
 
 /* ---------- audio ---------- */
 let ctx=null,master=null,src=null,buf=null,out=null,audioDirty=true,playing=false,t0=0,renderId=0,pending=null;
@@ -510,6 +532,45 @@ const stage=$('stage');
 stage.addEventListener('dragover',e=>{e.preventDefault();stage.classList.add('drop');});
 stage.addEventListener('dragleave',()=>stage.classList.remove('drop'));
 stage.addEventListener('drop',e=>{e.preventDefault();stage.classList.remove('drop');importImage(e.dataTransfer.files[0]);});
+
+/* ---------- Image Synth effects (SPEC §10, fx.js) ---------- */
+// MetaSynth's default Grid Layer (measured at 512×128): vertical lines every 32/128/256 px, horizontal lines every 24 rows.
+// Used only by Grid Filter. Rows here count from the bottom, the layer is laid out from the top.
+function gridLayer(){const g=new Uint8Array(W*H);
+  for(let r=0;r<H;r++){const y=H-1-r,hv=y%24===7?128:0;
+    for(let c=0;c<W;c++){const v=c%256===0?255:c%128===0?223:c%32===0?63:0;g[r*W+c]=Math.max(v,hv);}}
+  return g;}
+const FX_TIP={MotionBlur:'Gaussian blur along time; the grid sets the radius (max 62 px). Wraps around the ends',
+  Quantize:'Each grid cell becomes one value, halfway between its max and its average',
+  Echo:'Copies every grid step to the right, each a third as bright as the one before',
+  PreEcho:'Echo backwards: the copies come before each note',
+  Reverb:'Decaying tail after every fall in level; the grid sets its length. Approximate',
+  Repeat:'Full-level copies every grid step, to the right edge',
+  GridFilter:'Multiplies the picture by the Grid Layer. Ignores the grid size',
+  Pulse:'Silences the second half of every grid cell',
+  Saw:'Fades every grid cell from full level towards zero',
+  Shorten:'Cuts the last pixel off every note at least 2 px long. Ignores the grid',
+  Attack:'Sharper onsets: a jump of more than 16 gets 1.5× louder, the pixel before it goes dark. Ignores the grid',
+  Maximum:'Every column becomes its brightest pixel. Ignores the grid'};
+function runFx(e){fx(()=>{const n=W*H,img={w:W,h:H,r:new Uint8Array(n),g:new Uint8Array(n)};
+    for(let i=0;i<n;i++){img.r[i]=Math.round(L[i]*255);img.g[i]=Math.round(R[i]*255);}
+    const o=MSFX.apply(img,e.id,S.fxG,e.id==='GridFilter'?gridLayer():null,S.fxOff);
+    for(let i=0;i<n;i++){L[i]=o.r[i]/255;R[i]=o.g[i]/255;}});
+  if(!playing)status(e.usesG?`${e.name}, grid ${S.fxG} px`:e.name);}
+for(const e of MSFX.EFFECTS){const b=document.createElement('button');b.type='button';b.title=FX_TIP[e.id];
+  b.innerHTML=`<span>${e.name}</span>`+(!e.exact?'<small class="approx">≈ approx</small>':'');
+  b.onclick=()=>runFx(e);$('fxList').appendChild(b);}
+function setG(v){S.fxG=Math.max(1,Math.min(512,Math.round(+v)||1));$('gIn').value=S.fxG;
+  $('gOff').max=S.fxG-1;if(S.fxOff>S.fxG-1)setOff(S.fxG-1);
+  const n=Math.ceil((W-S.fxOff)/S.fxG)+(S.fxOff?1:0);$('gO').textContent=`${n} cells of ${S.fxG} px`;}
+function setOff(v){S.fxOff=Math.max(0,Math.min(S.fxG-1,Math.round(+v)||0));$('gOff').value=S.fxOff;$('gOffO').textContent=S.fxOff+' px';setG(S.fxG);}
+for(const s of [8,16,32,64,128,256,12,24,48,96,192]){const o=document.createElement('option');o.value=s;o.textContent=s+' px';$('gList').appendChild(o);}
+$('gList').onchange=e=>{if(e.target.value)setG(e.target.value);e.target.value='';};
+$('gIn').oninput=e=>{if(e.target.value!=='')setG(e.target.value);};
+$('gIn').onchange=e=>setG(e.target.value);
+$('gDec').onclick=()=>setG(S.fxG-1);$('gInc').onclick=()=>setG(S.fxG+1);
+$('gOff').oninput=e=>setOff(e.target.value);$('gOff').ondblclick=()=>setOff(0);
+$('gShow').onchange=e=>{S.fxShow=e.target.checked;};
 
 /* ---------- controls ---------- */
 function seg(id,key,cb){$(id).addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;setSeg(id,b.dataset.v);S[key]=b.dataset.v;cb&&cb();});}
