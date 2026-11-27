@@ -311,9 +311,19 @@ function draw(){
   if(playX>=0){const x=playX*w;vctx.fillStyle='rgba(255,255,255,.85)';vctx.fillRect(x-dpr,0,2*dpr,h);}
 }
 let hover=null;   // [col,row] under the pointer, for the brush outline
+// brush shadow for an image tip: the outline colour, more transparent the whiter (weaker) the tip pixel
+const ghosts=new WeakMap();
+function tipGhost(cell,w,h){let m=ghosts.get(cell);if(!m)ghosts.set(cell,m=new Map());const key=w+'x'+h;let c=m.get(key);
+  if(!c){const f=Brushes.scaled(cell,w,h);c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d'),id=x.createImageData(w,h);
+    for(let i=0;i<w*h;i++){id.data[4*i]=id.data[4*i+1]=id.data[4*i+2]=255;id.data[4*i+3]=Math.round(f[i]*.55*255);}
+    x.putImageData(id,0,0);if(m.size>8)m.clear();m.set(key,c);}
+  return c;}
+// the cell the next dab will use (incremental pipes step through their cells; other modes show the first)
+function nextCell(){const b=S.tip;if(b.cells.length<2||!b.dims.length||b.dims.some(d=>d.sel!=='incremental'))return b.cells[0];return Brushes.pickCell(b,PEN);}
 function drawBrushOutline(w,h,dpr){if(!hover||S.tool==='note')return;const b=brushShape(),sx=w/W,sy=h/H;
-  if(S.tip&&S.tool!=='spray'){const t=tipBox();vctx.save();vctx.translate((hover[0]+.5)*sx,h-(hover[1]+.5)*sy);vctx.scale(sx,sy);vctx.rotate(-S.ang*Math.PI/180);
-    vctx.beginPath();vctx.rect(-t.w/2,-t.h/2,t.w,t.h);vctx.restore();vctx.lineWidth=dpr;vctx.strokeStyle='rgba(255,255,255,.55)';vctx.stroke();return;}
+  if(S.tip&&S.tool!=='spray'){const t=tipBox(),g=tipGhost(nextCell(),t.w,t.h);vctx.save();
+    vctx.translate((hover[0]+.5)*sx,h-(hover[1]+.5)*sy);vctx.scale(sx,sy);vctx.rotate(-S.ang*Math.PI/180);
+    vctx.imageSmoothingEnabled=S.ang%360!==0;vctx.drawImage(g,-(t.w>>1)-.5,-(t.h>>1)-.5);vctx.restore();return;}
   const cx=(hover[0]+.5)*sx,cy=h-(hover[1]+.5)*sy,k=S.tool==='spray'?1.6:1;
   vctx.save();vctx.translate(cx,cy);vctx.scale(sx,sy);vctx.rotate(-S.ang*Math.PI/180);
   vctx.beginPath();vctx.ellipse(0,0,b.rx*k,b.ry*k*(S.tool==='spray'?.6:1),0,0,2*Math.PI);vctx.restore();
