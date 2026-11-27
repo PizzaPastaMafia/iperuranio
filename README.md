@@ -12,6 +12,7 @@ A clean-room study of MetaSynth CTX 2.0's Image Synth, and a Web Audio image syn
   - `html/index.html`: the page (UI, painting, maps, playback, WAV export)
   - `html/engine.js`: the synthesis engine. It runs as a Web Worker and implements the spec.
   - `docker-compose.yml`: nginx behind Traefik
+- **`deploy/`**: a systemd timer that pulls `master` onto the server every minute
 - **`verify/`**: runs `engine.js` on the stimuli and compares the result with the renders
 
 ## Run the synth locally
@@ -30,6 +31,8 @@ cp .env.example .env          # set SITE_NAME and DOMAIN
 chmod 755 html && chmod 644 html/*
 docker compose up -d          # needs the external `internalProxy` network
 ```
+
+To have the server pick up every new commit on `master` by itself, set up the timer in [`deploy/README.md`](deploy/README.md).
 
 ## Check the engine against MetaSynth
 

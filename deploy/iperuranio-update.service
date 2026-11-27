@@ -1,0 +1,11 @@
+[Unit]
+Description=Pull the latest iperuranio master and put it live
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Change these two lines to match your server: the user that owns the
+# checkout, and the path of the checkout.
+User=deploy
+ExecStart=/opt/iperuranio/deploy/auto-update.sh
