@@ -115,7 +115,8 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-r
       <label class="row"><span>Aspect <output id="aspO">1.00 : 1</output></span><input id="asp" type="range" min="-3" max="3" step="0.05" value="0" title="Width to height, 1:8 to 8:1. Double-click to reset"></label>
       <label class="row"><span>Angle <output id="angO">0°</output></span><input id="ang" type="range" min="-90" max="90" step="1" value="0" title="Counter-clockwise rotation. Double-click to reset"></label>
       <label class="row"><span>Hardness <output id="hardO">50%</output></span><input id="hard" type="range" min="0" max="100" step="1" value="50" title="0% fades from the centre, 100% is a solid edge. Double-click to reset"></label>
-      <p class="note" id="shapeNote">Aspect, angle and hardness shape Round, Spray and Erase. Note always draws a one-pixel-wide line.</p>
+      <label class="row"><span>Spacing <output id="spcO">1%</output></span><input id="spc" type="range" min="1" max="300" step="1" value="1" title="Gap between dabs along a stroke, as a percentage of the brush diameter. 1% paints a continuous stroke. Double-click to reset"></label>
+      <p class="note" id="shapeNote">Aspect, angle and hardness shape Round, Spray and Erase. Note always draws a one-pixel-wide line. Spacing works with every tool.</p>
     </section>
 
     <section class="panel">
@@ -207,7 +208,7 @@ const W=512,SR=44100,PPB=32,CUT=20000,BASEGAIN=0.099025;
 let H=256;
 let L=new Float32Array(W*H), R=new Float32Array(W*H);   // index r*W+c, r = rows from the bottom (n in SPEC)
 const $=id=>document.getElementById(id);
-const S={tool:'note',chan:'rg',size:3,bri:204/255,asp:0,ang:0,hard:.5,map:'semi',tune:3,spp:321,wave:'sine',att:4,rel:10,phase:'smallStereo'};
+const S={tool:'note',chan:'rg',size:3,bri:204/255,asp:0,ang:0,hard:.5,spc:.01,map:'semi',tune:3,spp:321,wave:'sine',att:4,rel:10,phase:'smallStereo'};
 
 /* ---------- pitch maps (SPEC §1.2, anchored at the bottom row, Master tuning A3) ---------- */
 const SCALES={major:[0,2,4,5,7,9,11],minharm:[0,2,3,5,7,8,11],minmel:[0,2,3,5,7,9,11]};
@@ -347,10 +348,15 @@ function erasePix(c,r,k){if(c<0||c>=W||r<0||r>=H||k<=0)return;const i=r*W+c,m=1-
   if(S.chan!=='g')L[i]=q8(L[i]*m);if(S.chan!=='r')R[i]=q8(R[i]*m);}
 function pos(e){const b=view.getBoundingClientRect();return [Math.floor((e.clientX-b.left)/b.width*W),H-1-Math.floor((e.clientY-b.top)/b.height*H)];}
 let painting=false,last=null;
-view.addEventListener('pointerdown',e=>{view.setPointerCapture(e.pointerId);snap();painting=true;const p=pos(e);dab(p[0],p[1]);last=p;dirtyPix=true;});
+let carry=0;   // distance in pixels travelled since the last dab
+view.addEventListener('pointerdown',e=>{view.setPointerCapture(e.pointerId);snap();painting=true;const p=pos(e);dab(p[0],p[1]);last=p;carry=0;dirtyPix=true;});
 view.addEventListener('pointermove',e=>{const p=pos(e);hover=p;readout(p[0],p[1]);if(!painting)return;
   const n=Math.max(Math.abs(p[0]-last[0]),Math.abs(p[1]-last[1]),1);
-  for(let k=1;k<=n;k++)dab(Math.round(last[0]+(p[0]-last[0])*k/n),Math.round(last[1]+(p[1]-last[1])*k/n));
+  const step=S.spc*2*S.size;   // Spacing is a fraction of the brush diameter (2 × Size)
+  if(step<=1)for(let k=1;k<=n;k++)dab(Math.round(last[0]+(p[0]-last[0])*k/n),Math.round(last[1]+(p[1]-last[1])*k/n));
+  else{const dx=p[0]-last[0],dy=p[1]-last[1],len=Math.hypot(dx,dy);let t=step-carry;
+    for(;t<=len;t+=step)dab(Math.round(last[0]+dx*t/len),Math.round(last[1]+dy*t/len));
+    carry=len-(t-step);}
   last=p;dirtyPix=true;});
 const endStroke=()=>{if(!painting)return;painting=false;changed();};
 view.addEventListener('pointerup',endStroke);view.addEventListener('pointerleave',()=>{hover=null;});view.addEventListener('pointercancel',endStroke);
@@ -475,7 +481,8 @@ function aspText(x){const a=Math.pow(2,x);return a>=1?a.toFixed(2)+' : 1':'1 : '
 $('asp').oninput=e=>{S.asp=+e.target.value;$('aspO').textContent=aspText(S.asp);};
 $('ang').oninput=e=>{S.ang=+e.target.value;$('angO').textContent=S.ang+'°';};
 $('hard').oninput=e=>{S.hard=+e.target.value/100;$('hardO').textContent=e.target.value+'%';};
-for(const [id,v] of [['asp',0],['ang',0],['hard',50]])$(id).ondblclick=e=>{e.target.value=v;e.target.dispatchEvent(new Event('input'));};
+$('spc').oninput=e=>{S.spc=+e.target.value/100;$('spcO').textContent=e.target.value+'%';};
+for(const [id,v] of [['asp',0],['ang',0],['hard',50],['spc',1]])$(id).ondblclick=e=>{e.target.value=v;e.target.dispatchEvent(new Event('input'));};
 function retune(){computeFreqs();drawRuler();drawAmap();updateFacts();changed();}
 $('map').onchange=e=>{S.map=e.target.value;retune();};
 $('tune').onchange=e=>{S.tune=+e.target.value;retune();};
