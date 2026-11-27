@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for a new iperuranio master every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+RandomizedDelaySec=10s
+
+[Install]
+WantedBy=timers.target
