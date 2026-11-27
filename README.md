@@ -11,6 +11,7 @@ A clean-room study of MetaSynth CTX 2.0's Image Synth, and a Web Audio image syn
 - **`web/`**: Raster Organ, the browser synth
   - `html/index.html`: the page (UI, painting, maps, playback, WAV export)
   - `html/engine.js`: the synthesis engine. It runs as a Web Worker and implements the spec.
+  - `html/brushes.js`: image brush tips (180 × 180 greyscale, black = full force) and the GIMP `.gbr` / `.gih` reader
   - `html/fx.js`: the Image Synth effects (Echo, Motion Blur, Quantize and the rest) with the Effects Grid, as measured in SPEC.md §10
   - `docker-compose.yml`: nginx behind Traefik
 - **`deploy/`**: a systemd timer that pulls `master` onto the server every minute

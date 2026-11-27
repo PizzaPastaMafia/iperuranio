@@ -73,6 +73,11 @@ select{background:var(--raise);border:1px solid var(--line);border-radius:6px;pa
 footer{color:var(--muted);font-size:12px;line-height:1.6}
 kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:var(--raise);color:var(--fg)}
 .drop{outline:2px dashed var(--grid);outline-offset:-6px}
+.tips{display:grid;grid-template-columns:repeat(auto-fill,minmax(40px,1fr));gap:5px}
+.tips button{padding:0;aspect-ratio:1;border-radius:5px;overflow:hidden;background:#fff;border:2px solid var(--line);display:grid;place-items:center}
+.tips button canvas{width:100%;height:100%;display:block}
+.tips button.ell{background:var(--raise);color:var(--muted);font-family:var(--mono);font-size:10px}
+.tips button[aria-pressed=true]{border-color:var(--grid);box-shadow:0 0 0 1px var(--grid)}
 .fxlist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 @media (min-width:761px){#fxPanel{grid-column:span 2}.fxlist{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .fxlist button{font-size:13px;display:flex;justify-content:space-between;align-items:baseline;gap:4px;padding:6px 8px;text-align:left;min-width:0}
@@ -118,13 +123,15 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-r
         <button type="button" class="ch-r" data-v="r" aria-pressed="false">R · left</button>
         <button type="button" class="ch-g" data-v="g" aria-pressed="false">G · right</button>
       </div>
-      <label class="row"><span>Size <output id="sizeO">3 px</output></span><input id="size" type="range" min="1" max="16" value="3"></label>
+      <div class="row"><span>Tip <output id="tipO">Ellipse</output></span><div class="tips" id="tips" role="group" aria-label="Brush tip"></div></div>
+      <div class="btns"><label class="file"><button type="button" tabindex="-1" style="width:100%">Add brush…</button><input id="tipFile" type="file" accept="image/*,.gih,.gbr" multiple aria-label="Add brush image, .gih or .gbr"></label><button type="button" id="tipDel" disabled title="Remove the selected imported brush">Remove</button></div>
+      <label class="row"><span>Size <output id="sizeO">3 px</output></span><input id="size" type="range" min="1" max="90" value="3" title="Half the brush width. At 90 an image brush paints at its full 180 × 180 px"></label>
       <label class="row"><span>Brightness <output id="briO">204 / 255</output></span><input id="bri" type="range" min="1" max="255" step="1" value="204"></label>
       <label class="row"><span>Aspect <output id="aspO">1.00 : 1</output></span><input id="asp" type="range" min="-3" max="3" step="0.05" value="0" title="Width to height, 1:8 to 8:1. Double-click to reset"></label>
       <label class="row"><span>Angle <output id="angO">0°</output></span><input id="ang" type="range" min="-90" max="90" step="1" value="0" title="Counter-clockwise rotation. Double-click to reset"></label>
       <label class="row"><span>Hardness <output id="hardO">50%</output></span><input id="hard" type="range" min="0" max="100" step="1" value="50" title="0% fades from the centre, 100% is a solid edge. Double-click to reset"></label>
       <label class="row"><span>Spacing <output id="spcO">1%</output></span><input id="spc" type="range" min="1" max="300" step="1" value="1" title="Gap between dabs along a stroke, as a percentage of the brush diameter. 1% paints a continuous stroke. Double-click to reset"></label>
-      <p class="note" id="shapeNote">Aspect, angle and hardness shape Round, Spray and Erase. Note always draws a one-pixel-wide line. Spacing works with every tool.</p>
+      <p class="note" id="shapeNote">Round and Erase paint with the tip. An image tip is a 180 × 180 greyscale picture: black paints at full force, white paints nothing. Add any image (it is turned grey and fitted to 180 × 180) or a GIMP .gih / .gbr brush. Aspect, angle and size shape the tip; hardness only shapes the ellipse. Note always draws a one-pixel-wide line. Spacing works with every tool.</p>
     </section>
 
     <section class="panel">
@@ -232,6 +239,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-r
 </div>
 
 <script src="fx.js"></script>
+<script src="brushes.js"></script>
 <script>
 (()=>{
 const W=512,SR=44100,PPB=32,CUT=20000,BASEGAIN=0.099025;
@@ -304,6 +312,8 @@ function draw(){
 }
 let hover=null;   // [col,row] under the pointer, for the brush outline
 function drawBrushOutline(w,h,dpr){if(!hover||S.tool==='note')return;const b=brushShape(),sx=w/W,sy=h/H;
+  if(S.tip&&S.tool!=='spray'){const t=tipBox();vctx.save();vctx.translate((hover[0]+.5)*sx,h-(hover[1]+.5)*sy);vctx.scale(sx,sy);vctx.rotate(-S.ang*Math.PI/180);
+    vctx.beginPath();vctx.rect(-t.w/2,-t.h/2,t.w,t.h);vctx.restore();vctx.lineWidth=dpr;vctx.strokeStyle='rgba(255,255,255,.55)';vctx.stroke();return;}
   const cx=(hover[0]+.5)*sx,cy=h-(hover[1]+.5)*sy,k=S.tool==='spray'?1.6:1;
   vctx.save();vctx.translate(cx,cy);vctx.scale(sx,sy);vctx.rotate(-S.ang*Math.PI/180);
   vctx.beginPath();vctx.ellipse(0,0,b.rx*k,b.ry*k*(S.tool==='spray'?.6:1),0,0,2*Math.PI);vctx.restore();
@@ -365,6 +375,7 @@ const shapeDist=(b,dx,dy)=>Math.hypot((dx*b.co+dy*b.si)/b.rx,(dy*b.co-dx*b.si)/b
 function falloff(d){const h=S.hard;if(d<=h)return 1;if(d>=1)return 0;const t=(d-h)/(1-h);return 1-t*t*(3-2*t);}
 function dab(c,r){
   const rad=S.size,v=S.bri;
+  if(S.tip&&(S.tool==='round'||S.tool==='erase')){stamp(c,r,S.tool==='erase',v);return;}
   if(S.tool==='note'){for(let dy=0;dy<Math.ceil(rad/4);dy++)setPix(c,r+dy,v,false);return;}
   const b=brushShape();
   if(S.tool==='spray'){for(let k=0;k<rad*1.5;k++){const a=Math.random()*6.283,d=Math.random()*1.6;
@@ -378,6 +389,25 @@ function dab(c,r){
 // soft erase: scale the pixel down by the brush strength (strength 1 clears it)
 function erasePix(c,r,k){if(c<0||c>=W||r<0||r>=H||k<=0)return;const i=r*W+c,m=1-k;
   if(S.chan!=='g')L[i]=q8(L[i]*m);if(S.chan!=='r')R[i]=q8(R[i]*m);}
+/* ---------- image tips (brushes.js): a 180×180 force map, black = full force ----------
+   Size is half the drawn width (Size 90 = 180 px, the brush at 1:1). Aspect squeezes it like the ellipse, Angle turns it
+   counter-clockwise, Brightness scales the force. Pipes (.gih) pick a cell per dab by their own selection mode. */
+const PEN={count:0,angle:0,pressure:.5};
+function tipBox(){const a=Math.pow(2,S.asp),d=2*S.size;return {w:Math.max(1,Math.round(d*Math.min(1,a))),h:Math.max(1,Math.round(d*Math.min(1,1/a)))};}
+function stamp(c,r,erase,val){
+  const t=tipBox(),cell=Brushes.pickCell(S.tip,PEN),f=Brushes.scaled(cell,t.w,t.h);PEN.count++;
+  const th=S.ang*Math.PI/180,co=Math.cos(th),si=Math.sin(th),rot=S.ang%360!==0,cu=t.w>>1,cv=t.h>>1;
+  const ex=Math.ceil(Math.abs(t.w/2*co)+Math.abs(t.h/2*si))+1,ey=Math.ceil(Math.abs(t.w/2*si)+Math.abs(t.h/2*co))+1;
+  const g=(x,y)=>x<0||y<0||x>=t.w||y>=t.h?0:f[y*t.w+x];
+  for(let dy=-ey;dy<=ey;dy++)for(let dx=-ex;dx<=ex;dx++){
+    // pixel offset from the dab (dy up) → tip picture position (rows down), turned back by the angle
+    let k;
+    if(!rot)k=g(cu+dx,cv-dy);
+    else{const u=cu+dx*co+dy*si,v=cv-(-dx*si+dy*co),x0=Math.floor(u),y0=Math.floor(v),fx=u-x0,fy=v-y0;
+      k=g(x0,y0)*(1-fx)*(1-fy)+g(x0+1,y0)*fx*(1-fy)+g(x0,y0+1)*(1-fx)*fy+g(x0+1,y0+1)*fx*fy;}
+    if(k<.5/255)continue;
+    if(erase)erasePix(c+dx,r+dy,k);else setPix(c+dx,r+dy,val*k,false);}
+}
 /* ---------- canvas transform: move / rotate / zoom with the picture tiled in both directions ----------
    The sliders always act on xfBase, the picture as it was when this transform began, so nothing
    degrades while you drag. Any other edit (snap/undo) drops the base and zeroes the sliders. */
@@ -409,10 +439,11 @@ let carry=0;   // distance in pixels travelled since the last dab
 let moving=null;   // shift-drag: [start pointer, start XF.x, start XF.y]
 view.addEventListener('pointerdown',e=>{view.setPointerCapture(e.pointerId);
   if(e.shiftKey){xfBegin();moving=[pos(e),XF.x,XF.y];return;}
-  snap();painting=true;const p=pos(e);dab(p[0],p[1]);last=p;carry=0;dirtyPix=true;});
+  snap();painting=true;const p=pos(e);PEN.pressure=e.pressure||.5;dab(p[0],p[1]);last=p;carry=0;dirtyPix=true;});
 view.addEventListener('pointermove',e=>{const p=pos(e);hover=p;readout(p[0],p[1]);
   if(moving){XF.x=Math.max(-256,Math.min(256,moving[1]+p[0]-moving[0][0]));XF.y=Math.max(-128,Math.min(128,moving[2]+p[1]-moving[0][1]));xfUI();xfApply();return;}
   if(!painting)return;
+  if(e.pressure)PEN.pressure=e.pressure;if(p[0]!==last[0]||p[1]!==last[1])PEN.angle=Math.atan2(p[1]-last[1],p[0]-last[0]);
   const n=Math.max(Math.abs(p[0]-last[0]),Math.abs(p[1]-last[1]),1);
   const step=S.spc*2*S.size;   // Spacing is a fraction of the brush diameter (2 × Size)
   if(step<=1)for(let k=1;k<=n;k++)dab(Math.round(last[0]+(p[0]-last[0])*k/n),Math.round(last[1]+(p[1]-last[1])*k/n));
@@ -571,6 +602,42 @@ $('gIn').onchange=e=>setG(e.target.value);
 $('gDec').onclick=()=>setG(S.fxG-1);$('gInc').onclick=()=>setG(S.fxG+1);
 $('gOff').oninput=e=>setOff(e.target.value);$('gOff').ondblclick=()=>setOff(0);
 $('gShow').onchange=e=>{S.fxShow=e.target.checked;};
+
+/* ---------- brush tips: the ellipse, built-in images, and images the user adds (kept in this browser) ---------- */
+S.tip=null;
+const TIP_KEY='rasterOrgan.brushes';
+let tips=Brushes.builtins();
+try{const saved=JSON.parse(localStorage.getItem(TIP_KEY)||'[]');for(const o of saved)tips.push(Brushes.unpack(o));}catch(_){}
+function saveTips(){try{localStorage.setItem(TIP_KEY,JSON.stringify(tips.filter(t=>t.custom).map(Brushes.pack)));return true;}
+  catch(_){status('Brush kept for this visit only (browser storage is full)',true);return false;}}
+function tipLabel(t){return t?`${t.name}${t.cells.length>1?` · ${t.cells.length} cells`:''}`:'Ellipse';}
+function renderTips(){const box=$('tips');box.textContent='';
+  const add=(t,i)=>{const b=document.createElement('button');b.type='button';b.title=tipLabel(t);b.setAttribute('aria-pressed',String(S.tip===t));
+    b.setAttribute('aria-label',tipLabel(t));
+    if(!t){b.className='ell';b.textContent='ellipse';}
+    else{const cv=document.createElement('canvas');cv.width=cv.height=48;Brushes.thumb(t.cells[0],cv);b.appendChild(cv);}
+    b.onclick=()=>selectTip(t);box.appendChild(b);};
+  add(null);tips.forEach(add);
+  $('tipO').textContent=tipLabel(S.tip);$('tipDel').disabled=!(S.tip&&S.tip.custom);}
+function selectTip(t){S.tip=t;PEN.count=0;
+  if(t&&t.spacing!=null){const v=Math.max(1,Math.min(300,t.spacing));$('spc').value=v;$('spc').dispatchEvent(new Event('input'));}
+  if(t&&(S.tool==='note'||S.tool==='spray')){S.tool='round';setSeg('tool','round');}
+  renderTips();}
+async function addTipFile(file){const name=file.name.replace(/\.[^.]+$/,''),ext=(file.name.split('.').pop()||'').toLowerCase();
+  if(ext==='gih')return Brushes.parseGIH(await file.arrayBuffer(),name);
+  if(ext==='gbr')return Brushes.parseGBR(await file.arrayBuffer(),name);
+  if(!file.type.startsWith('image/'))throw new Error('not an image, .gih or .gbr file');
+  const url=URL.createObjectURL(file);
+  try{const im=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>no(new Error('the image could not be read'));i.src=url;});
+    const w=im.naturalWidth,h=im.naturalHeight,c=document.createElement('canvas');c.width=w;c.height=h;
+    const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(im,0,0);
+    return Brushes.fromImageData(x.getImageData(0,0,w,h).data,w,h,name);}
+  finally{URL.revokeObjectURL(url);}}
+$('tipFile').onchange=async e=>{const files=[...e.target.files];e.target.value='';let last=null;
+  for(const f of files){try{const t=await addTipFile(f);tips.push(t);last=t;}catch(err){status(`${f.name}: ${err.message}`,true);}}
+  if(last){const ok=saveTips();selectTip(last);if(ok)status(`Added ${tipLabel(last)}`);}};
+$('tipDel').onclick=()=>{if(!S.tip||!S.tip.custom)return;tips=tips.filter(t=>t!==S.tip);saveTips();selectTip(null);};
+renderTips();
 
 /* ---------- controls ---------- */
 function seg(id,key,cb){$(id).addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;setSeg(id,b.dataset.v);S[key]=b.dataset.v;cb&&cb();});}
