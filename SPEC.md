@@ -250,6 +250,10 @@ Notation: one row of one channel, x = input, y = output, c = column (0…W−1),
 - To match MetaSynth bit-for-bit, use integer floor arithmetic as in `lab/fx/fxmodel.py`, including the Quantize
   last-column quirk and the Motion Blur wrap-around.
 - For Reverb, use the measured tails as an impulse response with max-style combining until an exact model exists.
+  Scaling the 255 tail to the level before each fall and combining by maximum gets within 21 levels on every test
+  picture (`web/html/fx.js`).
+- Implemented in the web synth as `web/html/fx.js` (Effects panel). `verify/check_fx.py` checks it against all 56 exact
+  outputs. The panel adds a grid offset, which MetaSynth doesn't have; at offset 0 the effects match MetaSynth.
 
 ## Appendix: test log
 | ID | Image | Measured |

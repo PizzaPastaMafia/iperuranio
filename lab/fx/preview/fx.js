@@ -1,9 +1,12 @@
 // Image Synth effects as measured on MetaSynth CTX 2.0 (SPEC.md §10). A JavaScript port of lab/fx/fxmodel.py.
 // An image is {w, h, r, g}: r and g are Uint8Array planes (row-major, row 0 = top, columns = time).
 // R and G are processed separately; every effect except Maximum works row by row. G = Effects Grid size in px.
+// off = grid offset in px (cells start at column off, off - G, ...). MetaSynth has no offset, so off = 0 is the measured
+// behaviour. It is an iperuranio extension and only changes the effects that work in cells (Quantize, Pulse, Saw).
 (function (root) {
   'use strict';
   const fl = Math.floor;
+  const pos = (c, G, off) => (((c - off) % G) + G) % G;   // position of column c inside its cell
 
   // row effects: (x: Int32Array input row, G) -> Int32Array output row
   const rowFx = {
@@ -22,25 +25,25 @@
       for (let c = G; c < x.length; c++) if (y[c - G] > y[c]) y[c] = y[c - G];
       return y;
     },
-    Quantize(x, G) {
+    Quantize(x, G, off) {
       const W = x.length, y = Int32Array.from(x);
-      for (let c0 = 0; c0 < W; c0 += G) {
-        const end = Math.min(c0 + G, W - 1);
+      for (let s = off ? off - G : 0; s < W; s += G) {
+        const c0 = Math.max(0, s), end = Math.min(s + G, W - 1);
         let mx = -1, sum = 0;
         for (let c = c0; c < end; c++) { if (x[c] > mx) mx = x[c]; sum += x[c]; }
         const v = end > c0 ? fl((mx + sum / G) / 2) : 0;
-        for (let c = c0; c < Math.min(c0 + G, W); c++) y[c] = v;
+        for (let c = c0; c < Math.min(s + G, W); c++) y[c] = v;
       }
       return y;
     },
-    Pulse(x, G) {
+    Pulse(x, G, off) {
       const y = Int32Array.from(x), half = fl(G / 2);
-      for (let c = 0; c < x.length; c++) if (c % G >= half) y[c] = 0;
+      for (let c = 0; c < x.length; c++) if (pos(c, G, off) >= half) y[c] = 0;
       return y;
     },
-    Saw(x, G) {
+    Saw(x, G, off) {
       const y = new Int32Array(x.length);
-      for (let c = 0; c < x.length; c++) y[c] = fl(x[c] * (G - (c % G)) / G);
+      for (let c = 0; c < x.length; c++) y[c] = fl(x[c] * (G - pos(c, G, off)) / G);
       return y;
     },
     Shorten(x) {
@@ -102,11 +105,11 @@
     return out;
   }
 
-  function mapRows(P, w, h, f, G) {
+  function mapRows(P, w, h, f, G, off) {
     const out = new Uint8Array(P.length), row = new Int32Array(w);
     for (let r = 0; r < h; r++) {
       for (let c = 0; c < w; c++) row[c] = P[r * w + c];
-      const y = f(row, G);
+      const y = f(row, G, off);
       for (let c = 0; c < w; c++) out[r * w + c] = y[c];
     }
     return out;
@@ -143,12 +146,12 @@
     { id: 'Maximum', name: 'Maximum', usesG: false, exact: true },
   ];
 
-  // apply(img, effectId, G, gridLayer?) -> new img. gridLayer = Uint8Array (w*h), only used by GridFilter.
-  function apply(img, id, G, grid) {
-    G = Math.max(1, G | 0);
+  // apply(img, effectId, G, gridLayer?, off?) -> new img. gridLayer = Uint8Array (w*h), only used by GridFilter.
+  function apply(img, id, G, grid, off) {
+    G = Math.max(1, G | 0); off = ((off | 0) % G + G) % G;
     const plane = P => id === 'Maximum' ? maximumPlane(P, img.w, img.h)
       : id === 'GridFilter' ? gridFilterPlane(P, grid)
-      : mapRows(P, img.w, img.h, rowFx[id], G);
+      : mapRows(P, img.w, img.h, rowFx[id], G, off);
     return { w: img.w, h: img.h, r: plane(img.r), g: plane(img.g) };
   }
 

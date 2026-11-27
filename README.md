@@ -11,9 +11,10 @@ A clean-room study of MetaSynth CTX 2.0's Image Synth, and a Web Audio image syn
 - **`web/`**: Raster Organ, the browser synth
   - `html/index.html`: the page (UI, painting, maps, playback, WAV export)
   - `html/engine.js`: the synthesis engine. It runs as a Web Worker and implements the spec.
+  - `html/fx.js`: the Image Synth effects (Echo, Motion Blur, Quantize and the rest) with the Effects Grid, as measured in SPEC.md §10
   - `docker-compose.yml`: nginx behind Traefik
 - **`deploy/`**: a systemd timer that pulls `master` onto the server every minute
-- **`verify/`**: runs `engine.js` on the stimuli and compares the result with the renders
+- **`verify/`**: runs `engine.js` on the stimuli and compares the result with the renders, and runs `fx.js` on the effect stimuli and compares it with MetaSynth's pictures
 
 ## Run the synth locally
 
@@ -39,6 +40,7 @@ To have the server pick up every new commit on `master` by itself, set up the ti
 ```sh
 pip install -r requirements.txt
 python3 verify/check_web.py   # needs node; exits 1 if any check fails
+python3 verify/check_fx.py    # web/html/fx.js against MetaSynth's effect outputs in lab/fx/out
 ```
 
 | Check | What it tests |
