@@ -1,0 +1,553 @@
+<title>Image Synth Effects Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: an instrument panel. Two picture strips (input, output) and a row scope on the left,
+   the effects rack with the Effects Grid control on the right, as in MetaSynth's Image Synth. */
+:root {
+  --bg: #eef0f4;
+  --panel: #ffffff;
+  --ink: #161a22;
+  --muted: #5b6372;
+  --line: #d5d9e2;
+  --accent: #2f5bd3;          /* the blue of MetaSynth's grid layer */
+  --accent-soft: #e1e8fb;
+  --on-accent: #ffffff;
+  --plane-r: #d8402f;
+  --plane-g: #1f9a54;
+  --warn: #a86a00;
+  --warn-soft: #fbefd6;
+  --screen: #07080b;           /* the picture is always drawn on black, as in MetaSynth */
+  --f-display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b; --panel: #1a1e26; --ink: #e7eaf0; --muted: #98a1b1; --line: #2c3240;
+    --accent: #7b9cff; --accent-soft: #232c45; --on-accent: #0b1330; --plane-r: #ff6e5c; --plane-g: #4cd388;
+    --warn: #f0b44c; --warn-soft: #362a12; --screen: #000000; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151b; --panel: #1a1e26; --ink: #e7eaf0; --muted: #98a1b1; --line: #2c3240;
+  --accent: #7b9cff; --accent-soft: #232c45; --on-accent: #0b1330; --plane-r: #ff6e5c; --plane-g: #4cd388;
+  --warn: #f0b44c; --warn-soft: #362a12; --screen: #000000; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 24px; }
+h1 { font: 600 1.6rem/1.15 var(--f-display); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); max-width: 62ch; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } .rack { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+.stack { display: grid; gap: 16px; min-width: 0; }
+.label { font: 500 11px/1 var(--f-data); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.strip-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.strip-head h2 { font: 600 15px/1.2 var(--f-display); margin: 0; }
+.strip-head h2 small { font: 400 12px var(--f-data); color: var(--muted); margin-left: 6px; }
+.scroller { overflow: auto; border-radius: 6px; background: var(--screen); max-height: 560px; }
+canvas.pic { display: block; image-rendering: pixelated; touch-action: none; }
+canvas.pic.draw { cursor: crosshair; }
+canvas.pic.inspect { cursor: row-resize; }
+.readout { font: 12px/1.4 var(--f-data); color: var(--muted); min-height: 1.4em; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.readout b { color: var(--ink); font-weight: 500; }
+.r { color: var(--plane-r); } .g { color: var(--plane-g); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button { border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--ink); font: 500 12px var(--f-body); padding: 5px 10px; cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+button, select, input { font: inherit; color: inherit; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 7px 12px; cursor: pointer; font-weight: 500; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.row-gap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* effects rack */
+.rack { display: grid; gap: 2px; margin: 8px 0 14px; }
+.fx { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 6px 9px; cursor: pointer; }
+.fx:hover { background: var(--accent-soft); }
+.fx[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.fx .tag { font: 500 10px/1 var(--f-data); letter-spacing: 0.04em; padding: 3px 5px; border-radius: 4px; border: 1px solid currentColor; opacity: 0.75; }
+.fx .tag.approx { color: var(--warn); background: var(--warn-soft); border-color: transparent; opacity: 1; }
+.fx[aria-pressed="true"] .tag { color: var(--on-accent); background: transparent; border-color: currentColor; }
+.grid-ctl { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.gfield { display: flex; align-items: stretch; gap: 6px; }
+.gfield input { width: 76px; text-align: center; font: 500 18px var(--f-data); border: 1px solid var(--line); border-radius: 7px; background: var(--bg); padding: 4px 6px; font-variant-numeric: tabular-nums; }
+.gfield select { border: 1px solid var(--line); border-radius: 7px; background: var(--bg); padding: 4px 6px; min-width: 0; flex: 1; }
+.gfield .btn { padding: 4px 10px; font: 500 16px var(--f-data); }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+.desc { font-size: 13px; margin: 0; }
+.desc code, .formula { font: 12px/1.5 var(--f-data); }
+.formula { display: block; background: var(--bg); border-radius: 6px; padding: 8px 10px; margin-top: 6px; overflow-x: auto; white-space: pre-wrap; }
+.note-approx { background: var(--warn-soft); color: var(--ink); border-radius: 6px; padding: 8px 10px; font-size: 12.5px; margin: 8px 0 0; }
+.tools { display: grid; gap: 10px; }
+.tools .row-gap label { font-size: 13px; }
+input[type="range"] { accent-color: var(--accent); width: 120px; }
+.plot-wrap { position: relative; }
+canvas#plot { display: block; width: 100%; height: 220px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font: 12px var(--f-data); color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+footer { color: var(--muted); font-size: 12px; }
+@media (prefers-reduced-motion: no-preference) { .fx, .btn { transition: background 120ms, border-color 120ms; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Image Synth Effects Lab</h1>
+    <p>The twelve right-hand effects of MetaSynth's Image Synth, rebuilt from pixel measurements. Pick an effect, change the Effects Grid and watch every pixel change.</p>
+  </header>
+
+  <div class="layout">
+    <div class="stack">
+      <section class="panel" aria-labelledby="in-h">
+        <div class="strip-head">
+          <h2 id="in-h">Input <small id="in-size">512 × 128 px</small></h2>
+          <div class="row-gap">
+            <div class="seg" role="group" aria-label="Pointer tool">
+              <button id="tool-inspect" aria-pressed="true">Pick row</button>
+              <button id="tool-draw" aria-pressed="false">Draw</button>
+            </div>
+            <div class="seg" role="group" aria-label="Zoom">
+              <button data-zoom="fit" aria-pressed="true">Fit</button>
+              <button data-zoom="2" aria-pressed="false">2×</button>
+              <button data-zoom="4" aria-pressed="false">4×</button>
+            </div>
+          </div>
+        </div>
+        <div class="scroller" id="in-scroll"><canvas class="pic inspect" id="in-cv" aria-label="Input picture"></canvas></div>
+        <div class="readout" id="in-read">Time runs left to right, pitch bottom to top. Red is the left channel, green the right.</div>
+      </section>
+
+      <section class="panel" aria-labelledby="out-h">
+        <div class="strip-head">
+          <h2 id="out-h">Output <small id="out-sub">Echo, grid 32 px</small></h2>
+          <div class="row-gap">
+            <label class="row-gap" style="gap:6px;font-size:13px"><input type="checkbox" id="show-grid" checked> Show grid cells</label>
+          </div>
+        </div>
+        <div class="scroller" id="out-scroll"><canvas class="pic inspect" id="out-cv" aria-label="Output picture"></canvas></div>
+        <div class="readout" id="out-read">&nbsp;</div>
+      </section>
+
+      <section class="panel" aria-labelledby="plot-h">
+        <div class="strip-head">
+          <h2 id="plot-h">Row <span id="plot-row">6</span> <small>pixel values, 0–255</small></h2>
+          <div class="seg" role="group" aria-label="Channel">
+            <button data-ch="r" aria-pressed="true">Red · left</button>
+            <button data-ch="g" aria-pressed="false">Green · right</button>
+          </div>
+        </div>
+        <div class="plot-wrap"><canvas id="plot" aria-label="Pixel values of the selected row, input and output"></canvas></div>
+        <div class="legend" style="margin-top:8px">
+          <span><i style="background:var(--muted);opacity:.45"></i>input</span>
+          <span><i id="leg-out" style="background:var(--plane-r)"></i>output</span>
+          <span><i style="background:var(--accent)"></i>grid cell edges</span>
+        </div>
+        <div class="readout" id="plot-read">Hover the plot to read exact values.</div>
+      </section>
+    </div>
+
+    <aside class="stack">
+      <section class="panel" aria-labelledby="fx-h">
+        <span class="label" id="fx-h">Effects</span>
+        <div class="rack" id="rack"></div>
+        <div class="grid-ctl">
+          <label class="label" for="g-in">Effects Grid</label>
+          <div class="gfield">
+            <button class="btn" id="g-dec" aria-label="Grid one pixel smaller">−</button>
+            <input type="number" id="g-in" min="1" max="1024" step="1" value="32" inputmode="numeric">
+            <button class="btn" id="g-inc" aria-label="Grid one pixel larger">+</button>
+            <select id="g-list" aria-label="Grid sizes">
+              <option value="">sizes…</option>
+            </select>
+          </div>
+          <p class="hint" id="g-info">16 cells of 32 px, starting at column 0.</p>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="what-h">
+        <span class="label" id="what-h">What it does</span>
+        <p class="desc" id="fx-desc" style="margin-top:8px"></p>
+        <code class="formula" id="fx-formula"></code>
+        <p class="note-approx" id="fx-approx" hidden>Approximation. MetaSynth's exact Reverb rule isn't known yet. This uses the measured tails, scaled to the level before each fall and combined by maximum. On the test pictures it lands within about 20 levels.</p>
+      </section>
+
+      <section class="panel tools" aria-labelledby="pic-h">
+        <span class="label" id="pic-h">Picture</span>
+        <div class="row-gap">
+          <select id="src" aria-label="Picture to start from" style="border:1px solid var(--line);border-radius:7px;background:var(--bg);padding:6px 8px;flex:1;min-width:0">
+            <option value="melody">Example: short phrase</option>
+            <option value="stim_fx1">Test picture 1: impulses and bars</option>
+            <option value="stim_fx2">Test picture 2: impulse ladders</option>
+            <option value="stim_fx3">Test picture 3: level steps</option>
+            <option value="blank">Blank</option>
+          </select>
+        </div>
+        <div class="row-gap">
+          <label class="btn" for="file" style="display:inline-block">Load PNG…</label>
+          <input type="file" id="file" accept="image/png,image/*" class="sr">
+        </div>
+        <div class="row-gap">
+          <button class="btn primary" id="apply">Apply to input</button>
+          <button class="btn" id="undo" disabled>Undo</button>
+        </div>
+        <p class="hint">Apply writes the output back into the input, so you can stack effects as in MetaSynth.</p>
+        <div id="brush" class="tools" style="border-top:1px solid var(--line);padding-top:10px">
+          <span class="label">Draw brush</span>
+          <div class="row-gap">
+            <div class="seg" role="group" aria-label="Brush channel">
+              <button data-bch="rg" aria-pressed="true">Both</button>
+              <button data-bch="r" aria-pressed="false">Red</button>
+              <button data-bch="g" aria-pressed="false">Green</button>
+            </div>
+          </div>
+          <div class="row-gap"><label for="b-val">Level</label><input type="range" id="b-val" min="0" max="255" value="255"><span id="b-val-o" class="readout" style="margin:0">255</span></div>
+          <div class="row-gap"><label for="b-size">Height</label><input type="range" id="b-size" min="1" max="8" value="1"><span id="b-size-o" class="readout" style="margin:0">1 px</span></div>
+          <p class="hint">Level 0 erases. Turn on Draw above the input picture first.</p>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <footer>Every effect except Reverb matches MetaSynth CTX 2.0's output bit for bit on 56 measured pictures. Source: SPEC.md §10 and lab/fx in the iperuranio repository.</footer>
+</div>
+
+<script src="samples.js"></script>
+<script src="fx.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const FX = window.MSFX;
+  const W0 = 512, H0 = 128;
+  const SIZES = [8, 16, 32, 64, 128, 256, 12, 24, 48, 96, 192];
+  const INFO = {
+    MotionBlur: ['A horizontal blur shaped like a Gaussian. The grid sets its radius, capped at 62 px. It wraps around, so the right edge bleeds into the left.',
+      'R = min(G, 62)\nw(d) = floor(32·exp(−2·(d/R)²)),  |d| ≤ R\ny[c] = floor(Σ w(d)·x[c+d] / Σ w)   (wraps around)'],
+    Quantize: ['Each grid cell becomes one flat value, halfway between the cell\'s brightest pixel and its average.',
+      'cell = [kG, kG+G)\ny = floor((max + sum/G) / 2)\nthe last picture column is left out of max and sum'],
+    Echo: ['Copies every bright pixel G px to the right, each copy ⅓ as bright as the one before, until it fades or hits the right edge.',
+      'for c = G … W−1:\n  if y[c−G] > y[c]:\n    y[c] = floor(x[c] + (y[c−G] − x[c]) / 3)'],
+    PreEcho: ['Echo running backwards in time: the copies appear G px before each note.',
+      'for c = W−1−G … 0:\n  if y[c+G] > y[c]:\n    y[c] = floor(x[c] + (y[c+G] − x[c]) / 3)'],
+    Reverb: ['Adds a decaying tail after every fall in level. The grid sets how long the tail lasts (22 px at G 8, 87 px at G 64).',
+      'tail after a fall from a:  floor(a · h_G[n] / 255)\ncombined with the picture by maximum\nh_G = measured tail of one 255 pixel'],
+    Repeat: ['Repeats every note at full level every G px, all the way to the right edge.',
+      'for c = G … W−1:\n  y[c] = max(y[c], y[c−G])'],
+    GridFilter: ['Multiplies the picture by the Grid Layer, the blue picture behind the canvas. The Effects Grid size isn\'t used. The Grid Layer is tinted blue on the input.',
+      'y = floor(x · blue / 256)'],
+    Pulse: ['Keeps the first half of every grid cell and silences the second half: a 50 % gate.',
+      'y[c] = 0  if (c mod G) ≥ G/2\ny[c] = x[c] otherwise'],
+    Saw: ['Fades every grid cell from full level down towards zero, a sawtooth gain that restarts each cell.',
+      'y[c] = floor(x[c] · (G − c mod G) / G)'],
+    Shorten: ['Cuts the last pixel off every note that is at least 2 px long. The grid size isn\'t used.',
+      'y[c] = 0  if x[c] > 0, x[c−1] > 0 and x[c+1] = 0'],
+    Attack: ['Sharpens note onsets. Where a pixel is more than 16 above the one before, it gets 1.5× louder and the pixel before it goes dark. The grid size isn\'t used.',
+      'if x[c] − x[c−1] > 16:\n  y[c]   = min(255, floor(1.5 · x[c]))\n  y[c−1] = 0'],
+    Maximum: ['The only vertical effect: every column becomes its brightest pixel, top to bottom. The grid size isn\'t used.',
+      'y[r][c] = max over rows of x[·][c]'],
+  };
+
+  const st = {
+    img: null, out: null, grid: null, gridBase: null, undo: [],
+    fx: 'Echo', G: 32, zoom: 'fit', tool: 'inspect', row: 0, plotCh: 'r', showGrid: true,
+    brush: { ch: 'rg', val: 255, size: 1 }, hover: null, plotHover: null,
+  };
+
+  // ---------- data ----------
+  async function inflate(b64) {
+    const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const ds = new DecompressionStream('deflate');
+    const buf = await new Response(new Blob([bin]).stream().pipeThrough(ds)).arrayBuffer();
+    return new Uint8Array(buf);
+  }
+  function blank(w, h) { return { w, h, r: new Uint8Array(w * h), g: new Uint8Array(w * h) }; }
+  function clone(m) { return { w: m.w, h: m.h, r: m.r.slice(), g: m.g.slice() }; }
+  function melody() {
+    // A short two-voice phrase, notes as horizontal bars (row = pitch, length = duration).
+    const m = blank(W0, H0);
+    const notes = [ // [row, start, length, level, channels]
+      [70, 8, 40, 230, 'rg'], [62, 56, 24, 200, 'rg'], [58, 88, 24, 220, 'rg'], [54, 120, 56, 255, 'rg'],
+      [62, 184, 16, 180, 'r'], [66, 208, 16, 170, 'r'], [70, 232, 48, 240, 'rg'], [50, 296, 8, 255, 'g'],
+      [46, 312, 8, 230, 'g'], [42, 328, 8, 210, 'g'], [38, 344, 40, 255, 'rg'], [58, 400, 32, 200, 'r'],
+      [54, 440, 64, 235, 'rg'],
+      [100, 8, 112, 120, 'rg'], [96, 128, 120, 120, 'rg'], [104, 256, 120, 110, 'rg'], [100, 384, 120, 120, 'rg'],
+      [20, 24, 2, 255, 'rg'], [20, 152, 2, 255, 'rg'], [20, 280, 2, 255, 'rg'], [20, 408, 2, 255, 'rg'],
+    ];
+    for (const [r, c0, len, v, ch] of notes)
+      for (let c = c0; c < Math.min(W0, c0 + len); c++) {
+        if (ch.includes('r')) m.r[r * W0 + c] = v;
+        if (ch.includes('g')) m.g[r * W0 + c] = v;
+      }
+    return m;
+  }
+  async function sample(name) {
+    if (name === 'melody') return melody();
+    if (name === 'blank') return blank(W0, H0);
+    const raw = await inflate(window.MSFX_SAMPLES[name]);
+    return { w: W0, h: H0, r: raw.slice(0, W0 * H0), g: raw.slice(W0 * H0) };
+  }
+  function gridFor(w, h) { // the measured Grid Layer, tiled to the picture size
+    if (w === W0 && h === H0) return st.gridBase;
+    const g = new Uint8Array(w * h);
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) g[r * w + c] = st.gridBase[(r % H0) * W0 + (c % W0)];
+    return g;
+  }
+  const DEFAULT_ROW = { melody: 54, stim_fx1: 6, stim_fx2: 121, stim_fx3: 62, blank: 64 };
+
+  // ---------- compute ----------
+  let pending = false;
+  function recompute() {
+    if (pending || !st.img) return; pending = true;
+    requestAnimationFrame(() => { pending = false; st.out = FX.apply(st.img, st.fx, st.G, st.grid); drawAll(); });
+  }
+
+  // ---------- drawing ----------
+  const off = document.createElement('canvas');
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function scale() {
+    if (st.zoom !== 'fit') return +st.zoom;
+    const avail = $('in-scroll').parentElement.clientWidth - 28;
+    return Math.max(0.5, avail / st.img.w);
+  }
+  function paintPicture(cv, m, withGridLayer) {
+    const z = scale(), dpr = window.devicePixelRatio || 1;
+    const cw = Math.round(m.w * z), ch = Math.round(m.h * z);
+    cv.style.width = cw + 'px'; cv.style.height = ch + 'px';
+    cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
+    off.width = m.w; off.height = m.h;
+    const octx = off.getContext('2d'), id = octx.createImageData(m.w, m.h), d = id.data;
+    for (let i = 0; i < m.w * m.h; i++) {
+      d[4 * i] = m.r[i]; d[4 * i + 1] = m.g[i];
+      d[4 * i + 2] = withGridLayer ? Math.round(st.grid[i] * 0.55) : 0; d[4 * i + 3] = 255;
+    }
+    octx.putImageData(id, 0, 0);
+    const ctx = cv.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, cv.width, cv.height);
+    const sx = cv.width / m.w, sy = cv.height / m.h;
+    if (st.showGrid) {
+      ctx.strokeStyle = 'rgba(110,145,255,0.38)'; ctx.lineWidth = Math.max(1, dpr);
+      ctx.beginPath();
+      for (let c = 0; c <= m.w; c += st.G) { const x = Math.round(c * sx) + 0.5; ctx.moveTo(x, 0); ctx.lineTo(x, cv.height); }
+      ctx.stroke();
+    }
+    // selected row: brackets at both ends plus a faint band
+    const y0 = st.row * sy, y1 = (st.row + 1) * sy;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = dpr; ctx.setLineDash([4 * dpr, 4 * dpr]);
+    ctx.beginPath(); ctx.moveTo(0, Math.floor(y0 - dpr) + 0.5); ctx.lineTo(cv.width, Math.floor(y0 - dpr) + 0.5); ctx.moveTo(0, Math.ceil(y1 + dpr) - 0.5); ctx.lineTo(cv.width, Math.ceil(y1 + dpr) - 0.5); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#ffffff';
+    const t = 5 * dpr, ym = (y0 + y1) / 2;
+    ctx.beginPath(); ctx.moveTo(0, ym - t); ctx.lineTo(t, ym); ctx.lineTo(0, ym + t); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(cv.width, ym - t); ctx.lineTo(cv.width - t, ym); ctx.lineTo(cv.width, ym + t); ctx.fill();
+  }
+  function drawPlot() {
+    const cv = $('plot'), dpr = window.devicePixelRatio || 1;
+    const cw = cv.clientWidth, chh = cv.clientHeight;
+    cv.width = Math.round(cw * dpr); cv.height = Math.round(chh * dpr);
+    const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr);
+    const L = 34, R = 8, T = 8, B = 22, w = st.img.w;
+    const pw = cw - L - R, ph = chh - T - B;
+    const X = c => L + (c / w) * pw, Y = v => T + ph - (v / 255) * ph;
+    ctx.clearRect(0, 0, cw, chh);
+    ctx.font = '11px ' + css('--f-data'); ctx.fillStyle = css('--muted'); ctx.textAlign = 'right';
+    ctx.strokeStyle = css('--line'); ctx.lineWidth = 1;
+    for (const v of [0, 64, 128, 192, 255]) { ctx.beginPath(); ctx.moveTo(L, Math.round(Y(v)) + 0.5); ctx.lineTo(L + pw, Math.round(Y(v)) + 0.5); ctx.stroke(); ctx.fillText(v, L - 6, Y(v) + 4); }
+    ctx.textAlign = 'center';
+    const step = w <= 512 ? 64 : 128;
+    for (let c = 0; c <= w; c += step) ctx.fillText(c, Math.min(X(c), L + pw - 10), chh - 6);
+    if (st.showGrid) {
+      ctx.strokeStyle = css('--accent'); ctx.globalAlpha = 0.35;
+      ctx.beginPath(); for (let c = 0; c <= w; c += st.G) { const x = Math.round(X(c)) + 0.5; ctx.moveTo(x, T); ctx.lineTo(x, T + ph); } ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    const inP = st.plotCh === 'r' ? st.img.r : st.img.g, outP = st.plotCh === 'r' ? st.out.r : st.out.g, o = st.row * w;
+    // input as a filled step area
+    ctx.fillStyle = css('--muted'); ctx.globalAlpha = 0.28;
+    ctx.beginPath(); ctx.moveTo(X(0), Y(0));
+    for (let c = 0; c < w; c++) { ctx.lineTo(X(c), Y(inP[o + c])); ctx.lineTo(X(c + 1), Y(inP[o + c])); }
+    ctx.lineTo(X(w), Y(0)); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    // output as a step line
+    ctx.strokeStyle = css(st.plotCh === 'r' ? '--plane-r' : '--plane-g'); ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(X(0), Y(outP[o]));
+    for (let c = 0; c < w; c++) { ctx.lineTo(X(c), Y(outP[o + c])); ctx.lineTo(X(c + 1), Y(outP[o + c])); }
+    ctx.stroke();
+    if (st.plotHover != null) {
+      const c = st.plotHover;
+      ctx.strokeStyle = css('--ink'); ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(Math.round(X(c + 0.5)) + 0.5, T); ctx.lineTo(Math.round(X(c + 0.5)) + 0.5, T + ph); ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    cv._map = { L, pw, w };
+  }
+  function drawAll() {
+    if (!st.out) return;
+    paintPicture($('in-cv'), st.img, st.fx === 'GridFilter');
+    paintPicture($('out-cv'), st.out, false);
+    drawPlot();
+    $('plot-row').textContent = st.row;
+    $('in-size').textContent = `${st.img.w} × ${st.img.h} px`;
+    const e = FX.EFFECTS.find(f => f.id === st.fx);
+    $('out-sub').textContent = e.usesG ? `${e.name}, grid ${st.G} px` : `${e.name} (ignores the grid)`;
+    $('leg-out').style.background = `var(${st.plotCh === 'r' ? '--plane-r' : '--plane-g'})`;
+    updateReadouts();
+  }
+
+  // ---------- readouts ----------
+  function fmt(m, i) { return `<span class="r">R ${m.r[i]}</span> <span class="g">G ${m.g[i]}</span>`; }
+  function updateReadouts() {
+    const h = st.hover;
+    if (h) {
+      const i = h.r * st.img.w + h.c;
+      const txt = `col <b>${h.c}</b> · row <b>${h.r}</b> · cell <b>${Math.floor(h.c / st.G)}</b> (col ${h.c % st.G} of ${st.G}) · in ${fmt(st.img, i)} → out ${fmt(st.out, i)}`;
+      $('in-read').innerHTML = txt; $('out-read').innerHTML = txt;
+    }
+    if (st.plotHover != null) {
+      const c = st.plotHover, i = st.row * st.img.w + c;
+      $('plot-read').innerHTML = `col <b>${c}</b> · in ${fmt(st.img, i)} → out ${fmt(st.out, i)}`;
+    }
+  }
+  function cellAt(cv, ev) {
+    const rect = cv.getBoundingClientRect();
+    const c = Math.floor((ev.clientX - rect.left) / rect.width * st.img.w);
+    const r = Math.floor((ev.clientY - rect.top) / rect.height * st.img.h);
+    if (c < 0 || r < 0 || c >= st.img.w || r >= st.img.h) return null;
+    return { c, r };
+  }
+
+  // ---------- pointer ----------
+  let painting = false, strokeSaved = false;
+  function paintAt(p) {
+    const b = st.brush;
+    for (let dr = 0; dr < b.size; dr++) {
+      const r = p.r - Math.floor((b.size - 1) / 2) + dr;
+      if (r < 0 || r >= st.img.h) continue;
+      const i = r * st.img.w + p.c;
+      if (b.ch.includes('r')) st.img.r[i] = b.val;
+      if (b.ch.includes('g')) st.img.g[i] = b.val;
+    }
+  }
+  let last = null;
+  function strokeTo(p) {
+    if (!last) { paintAt(p); last = p; return; }
+    const n = Math.max(Math.abs(p.c - last.c), Math.abs(p.r - last.r), 1);
+    for (let k = 1; k <= n; k++) paintAt({ c: Math.round(last.c + (p.c - last.c) * k / n), r: Math.round(last.r + (p.r - last.r) * k / n) });
+    last = p;
+  }
+  for (const id of ['in-cv', 'out-cv']) {
+    const cv = $(id);
+    cv.addEventListener('pointermove', ev => {
+      const p = cellAt(cv, ev); st.hover = p;
+      if (painting && id === 'in-cv' && p) { strokeTo(p); recompute(); return; }
+      updateReadouts();
+    });
+    cv.addEventListener('pointerleave', () => { st.hover = null; });
+    cv.addEventListener('pointerdown', ev => {
+      const p = cellAt(cv, ev); if (!p) return;
+      if (st.tool === 'draw' && id === 'in-cv') {
+        cv.setPointerCapture(ev.pointerId); painting = true; last = null;
+        if (!strokeSaved) { pushUndo(); strokeSaved = true; }
+        st.row = p.r; strokeTo(p); recompute();
+      } else { st.row = p.r; drawAll(); }
+    });
+    cv.addEventListener('pointerup', () => { painting = false; strokeSaved = false; last = null; });
+  }
+  const plot = $('plot');
+  plot.addEventListener('pointermove', ev => {
+    const m = plot._map; if (!m) return;
+    const rect = plot.getBoundingClientRect();
+    const c = Math.floor((ev.clientX - rect.left - m.L) / m.pw * m.w);
+    st.plotHover = c >= 0 && c < m.w ? c : null; drawPlot(); updateReadouts();
+  });
+  plot.addEventListener('pointerleave', () => { st.plotHover = null; drawPlot(); });
+
+  // ---------- controls ----------
+  function setPressed(sel, attr, val) { document.querySelectorAll(sel).forEach(b => b.setAttribute('aria-pressed', String(b.dataset[attr] === val))); }
+  function pushUndo() { st.undo.push(clone(st.img)); if (st.undo.length > 40) st.undo.shift(); $('undo').disabled = false; }
+
+  const rack = $('rack');
+  for (const e of FX.EFFECTS) {
+    const b = document.createElement('button');
+    b.className = 'fx'; b.dataset.fx = e.id; b.setAttribute('aria-pressed', 'false');
+    b.innerHTML = `<span>${e.name}</span>` + (!e.exact ? '<span class="tag approx">≈ approx</span>' : !e.usesG ? '<span class="tag">no grid</span>' : '');
+    b.addEventListener('click', () => selectFx(e.id));
+    rack.appendChild(b);
+  }
+  function selectFx(id) {
+    st.fx = id; setPressed('.fx', 'fx', id);
+    const [d, f] = INFO[id]; $('fx-desc').textContent = d; $('fx-formula').textContent = f;
+    $('fx-approx').hidden = id !== 'Reverb';
+    recompute();
+  }
+  function setG(v) {
+    v = Math.max(1, Math.min(1024, Math.round(+v || 1)));
+    st.G = v; $('g-in').value = v;
+    const n = Math.ceil(st.img.w / v), rem = st.img.w % v;
+    $('g-info').textContent = `${n} cell${n === 1 ? '' : 's'} of ${v} px, starting at column 0` + (rem ? `. The last cell is ${rem} px.` : '.');
+    recompute();
+  }
+  for (const s of SIZES) { const o = document.createElement('option'); o.value = s; o.textContent = s + ' px'; $('g-list').appendChild(o); }
+  $('g-list').addEventListener('change', e => { if (e.target.value) setG(e.target.value); e.target.value = ''; });
+  $('g-in').addEventListener('input', e => { if (e.target.value !== '') setG(e.target.value); });
+  $('g-in').addEventListener('change', e => setG(e.target.value));
+  $('g-dec').addEventListener('click', () => setG(st.G - 1));
+  $('g-inc').addEventListener('click', () => setG(st.G + 1));
+
+  document.querySelectorAll('[data-zoom]').forEach(b => b.addEventListener('click', () => { st.zoom = b.dataset.zoom; setPressed('[data-zoom]', 'zoom', st.zoom); drawAll(); }));
+  document.querySelectorAll('[data-ch]').forEach(b => b.addEventListener('click', () => { st.plotCh = b.dataset.ch; setPressed('[data-ch]', 'ch', st.plotCh); drawAll(); }));
+  document.querySelectorAll('[data-bch]').forEach(b => b.addEventListener('click', () => { st.brush.ch = b.dataset.bch; setPressed('[data-bch]', 'bch', st.brush.ch); }));
+  function setTool(t) {
+    st.tool = t; $('tool-inspect').setAttribute('aria-pressed', String(t === 'inspect')); $('tool-draw').setAttribute('aria-pressed', String(t === 'draw'));
+    $('in-cv').className = 'pic ' + (t === 'draw' ? 'draw' : 'inspect');
+  }
+  $('tool-inspect').addEventListener('click', () => setTool('inspect'));
+  $('tool-draw').addEventListener('click', () => setTool('draw'));
+  $('b-val').addEventListener('input', e => { st.brush.val = +e.target.value; $('b-val-o').textContent = e.target.value; });
+  $('b-size').addEventListener('input', e => { st.brush.size = +e.target.value; $('b-size-o').textContent = e.target.value + ' px'; });
+  $('show-grid').addEventListener('change', e => { st.showGrid = e.target.checked; drawAll(); });
+
+  $('apply').addEventListener('click', () => { pushUndo(); st.img = clone(st.out); recompute(); });
+  $('undo').addEventListener('click', () => { const p = st.undo.pop(); if (p) { st.img = p; st.grid = gridFor(p.w, p.h); recompute(); } $('undo').disabled = !st.undo.length; });
+
+  async function loadSource(name) {
+    const m = await sample(name);
+    st.img = m; st.grid = gridFor(m.w, m.h); st.undo = []; $('undo').disabled = true;
+    st.row = DEFAULT_ROW[name] ?? 0; setG(st.G); recompute();
+  }
+  $('src').addEventListener('change', e => loadSource(e.target.value));
+  $('file').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    const url = URL.createObjectURL(f), im = new Image();
+    im.onload = () => {
+      const w = Math.min(im.naturalWidth, 1024), h = Math.min(im.naturalHeight, 512);
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(im, 0, 0);
+      const d = ctx.getImageData(0, 0, w, h).data, m = blank(w, h);
+      for (let i = 0; i < w * h; i++) { m.r[i] = d[4 * i]; m.g[i] = d[4 * i + 1]; }
+      pushUndo(); st.img = m; st.grid = gridFor(w, h); st.row = Math.min(st.row, h - 1); setG(st.G); recompute();
+      URL.revokeObjectURL(url); e.target.value = '';
+    };
+    im.src = url;
+  });
+
+  new ResizeObserver(() => drawAll()).observe(document.querySelector('.layout'));
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawAll);
+  new MutationObserver(drawAll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  (async function start() {
+    st.gridBase = await inflate(window.MSFX_SAMPLES.grid);
+    selectFx('Echo');
+    await loadSource('melody');
+  })();
+})();
+</script>
