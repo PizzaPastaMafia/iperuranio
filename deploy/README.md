@@ -11,16 +11,26 @@ The pieces:
 
 These steps assume the checkout lives in `/opt/iperuranio` and belongs to a user called `deploy`. Use your own path and user, and change them in `iperuranio-update.service` to match.
 
-1. **Clone the repo** (skip this if the site is already running from a clone):
+1. **Clone the repo** to its permanent home. The repo is public, so no key is needed:
 
    ```sh
    sudo mkdir -p /opt/iperuranio && sudo chown deploy: /opt/iperuranio
    sudo -u deploy git clone -b master https://github.com/PizzaPastaMafia/iperuranio.git /opt/iperuranio
    ```
 
-   If the repo is private, give the server read-only access with a deploy key: run `sudo -u deploy ssh-keygen -t ed25519 -N "" -f ~deploy/.ssh/iperuranio`, add the `.pub` file under the repo's **Settings → Deploy keys** (leave "Allow write access" off), and clone `git@github.com:PizzaPastaMafia/iperuranio.git` with `GIT_SSH_COMMAND="ssh -i ~/.ssh/iperuranio"`. Then run `git config core.sshCommand "ssh -i ~/.ssh/iperuranio"` inside the checkout so later fetches use the key.
+   If the repo ever becomes private, give the server read-only access with a deploy key: run `sudo -u deploy ssh-keygen -t ed25519 -N "" -f ~deploy/.ssh/iperuranio`, add the `.pub` file under the repo's **Settings → Deploy keys** (leave "Allow write access" off), then inside the checkout run `git remote set-url origin git@github.com:PizzaPastaMafia/iperuranio.git` and `git config core.sshCommand "ssh -i ~/.ssh/iperuranio"`.
 
-2. **Start the site** if it isn't running yet (see the main README's Deploy section): copy `web/.env.example` to `web/.env`, fill it in, and run `docker compose up -d` in `web/`.
+2. **Move the site onto the clone.** If the site is currently running from copied files (not a git clone), switch it over once. It is down for a few seconds while the container restarts; Traefik picks it up again from the same labels.
+
+   ```sh
+   cp /path/to/old/web/.env /opt/iperuranio/web/.env
+   (cd /path/to/old/web && docker compose down)
+   (cd /opt/iperuranio/web && docker compose up -d)
+   ```
+
+   Check that the site loads, then delete or archive the old folder. Compose names the container after the folder (here `web-website-1`), so it only changes if the old folder had a different name; that matters only if something else refers to the container by name.
+
+   On a brand-new server, just copy `web/.env.example` to `web/.env`, fill it in, and run `docker compose up -d` in `/opt/iperuranio/web`.
 
 3. **Let the `deploy` user run Docker**, so the script can recreate the container when the compose file changes: `sudo usermod -aG docker deploy`. If you'd rather not, set `User=root` in the service file instead.
 
